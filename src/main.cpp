@@ -3,35 +3,21 @@
 #include <Wire.h>
 #include <Adafruit_MCP4725.h>
 
-const double MAX_OUTPUT_VOLTAGE = 3.3;
+#include "Key.h"
+#include "SerialReader.h"
 
 const uint8_t NUM_KEYS = 32;
 const double MIN_KEY_HERTZ = 87.30706; // F2
-//const double MIN_KEY_HERTZ = 174.6141; // F3
 
-// Values determined experimentally
-const double VOLTS_PER_HERTZ = 0.003835;
-const double VOLTAGE_BIAS = 0.02462;
+const double MAX_OUTPUT_VOLTAGE = 3.3;
+const uint32_t ANALOG_MAX = 4095;
+const uint32_t DETUNE_PIN = 0;
+const uint32_t OSCILLOSCOPE_PIN = 1;
 
-const uint32_t MAX_ANALOG_OUTPUT = 4095;
-
-const uint8_t SERIAL_INPUT_LENGTH = 64;
-
-struct Key {
-	double frequency;
-	double voltage;
-	uint32_t analogOutput;
-	bool on;
-};
-
+Adafruit_MCP4725 primaryDac;
+Adafruit_MCP4725 secondaryDac;
 Key keys[NUM_KEYS];
-Adafruit_MCP4725 dac;
-
-size_t getSerialInput(char *buffer, size_t length) {
-	size_t numBytesRead = Serial.readBytesUntil('\n', buffer, length - 1);
-	buffer[numBytesRead] = '\0';
-	return numBytesRead;
-}
+SerialReader serialReader;
 
 int getArgumentInt(char *command, size_t length, size_t prefixLength) {
 	char argument[length - prefixLength + 1];
@@ -43,27 +29,28 @@ int getArgumentInt(char *command, size_t length, size_t prefixLength) {
 }
 
 void readKeyboard() {
-	char serialBuffer[SERIAL_INPUT_LENGTH];
-	size_t numReadBytes = getSerialInput(serialBuffer, SERIAL_INPUT_LENGTH);
-	if (numReadBytes == 0) {
+	char *serialBuffer = serialReader.getBuffer('\n');
+	if (!serialBuffer) {
+		// Data not ready
 		return;
 	}
-	Serial.println(serialBuffer);
+	uint8_t bufferLength = serialReader.getBufferLength();
+	// Serial.println("ECHO | " + String(serialBuffer));
 
 	uint8_t noteOnPrefixLength = 3;
 	uint8_t noteOffPrefixLength = 4;
 
 	// Set keys on or off based on MIDI keyboard input
-	if (numReadBytes > noteOnPrefixLength && serialBuffer[0] == 'O' && serialBuffer[1] == 'N') {
-		int noteId = getArgumentInt(serialBuffer, numReadBytes, noteOnPrefixLength);
+	if (bufferLength > noteOnPrefixLength && serialBuffer[0] == 'O' && serialBuffer[1] == 'N') {
+		int noteId = getArgumentInt(serialBuffer, bufferLength, noteOnPrefixLength);
 		if (noteId >= 0 && noteId < NUM_KEYS) {
 			keys[noteId].on = true;
 		}
 	}
-	else if (numReadBytes > noteOffPrefixLength &&
+	else if (bufferLength > noteOffPrefixLength &&
 		serialBuffer[0] == 'O' && serialBuffer[1] == 'F' && serialBuffer[2] == 'F'
 	) {
-		int noteId = getArgumentInt(serialBuffer, numReadBytes, noteOffPrefixLength);
+		int noteId = getArgumentInt(serialBuffer, bufferLength, noteOffPrefixLength);
 		if (noteId >= 0 && noteId < NUM_KEYS) {
 			keys[noteId].on = false;
 		}
@@ -71,11 +58,20 @@ void readKeyboard() {
 }
 
 void playKey(uint8_t index) {
-	dac.setVoltage(keys[index].analogOutput, false);
-	Serial.print("Target voltage: ");
-	Serial.print(String(keys[index].voltage, 4));
-	Serial.print("    Target frequency: ");
-	Serial.println(keys[index].frequency);
+	primaryDac.setVoltage(keys[index].primaryAnalogOutput, false);
+
+	int detuneValue = analogRead(DETUNE_PIN);
+	double detuneExponent = (detuneValue - ANALOG_MAX / 2.0) *
+		14.0 / static_cast<double>(ANALOG_MAX);
+	double detuneMultiplier = pow(2.0, detuneExponent / 12.0);
+	secondaryDac.setVoltage(keys[index].secondaryAnalogOutput * detuneMultiplier, false);
+
+	// Serial.print("INFO | DAC 1 target voltage: ");
+	// Serial.print(String(keys[index].primaryVoltage, 4));
+	// Serial.print(" | DAC 2 target voltage: ");
+	// Serial.print(String(keys[index].secondaryVoltage, 4));
+	// Serial.print(" | Target frequency: ");
+	// Serial.println(String(keys[index].frequency, 2));
 }
 
 void playNotes() {
@@ -86,20 +82,39 @@ void playNotes() {
 			return;
 		}
 	}
-	dac.setVoltage(0, false);
+	primaryDac.setVoltage(0, false);
+	secondaryDac.setVoltage(0, false);
+}
+
+//Models determined experimentally
+double getPrimaryVoltageForFrequency(double frequency) {
+	return 0.00000029 * frequency * frequency + 0.00260996 * frequency + 0.03378609;
+}
+double getSecondaryVoltageForFrequency(double frequency) {
+	return 0.00000022 * frequency * frequency + 0.00257616 * frequency + 0.04023571;
 }
 
 void setup() {
 	Serial.begin(115200);
-	dac.begin(0x60);
+	//Serial.setTimeout(4);
 
+	primaryDac.begin(0x60);
+	secondaryDac.begin(0x61);
+
+	analogReadResolution(12);
 	analogWriteResolution(12);
 
 	for (uint8_t i = 0; i < NUM_KEYS; ++i) {
 		keys[i].frequency = MIN_KEY_HERTZ * pow(2.0, i / 12.0);
-		keys[i].voltage = VOLTS_PER_HERTZ * keys[i].frequency + VOLTAGE_BIAS;
-		keys[i].analogOutput = static_cast<uint32_t>(
-			keys[i].voltage / MAX_OUTPUT_VOLTAGE * MAX_ANALOG_OUTPUT
+
+		keys[i].primaryVoltage = getPrimaryVoltageForFrequency(keys[i].frequency);
+		keys[i].primaryAnalogOutput = static_cast<uint32_t>(
+			keys[i].primaryVoltage / MAX_OUTPUT_VOLTAGE * ANALOG_MAX
+		);
+
+		keys[i].secondaryVoltage = getSecondaryVoltageForFrequency(keys[i].frequency);
+		keys[i].secondaryAnalogOutput = static_cast<uint32_t>(
+			keys[i].secondaryVoltage / MAX_OUTPUT_VOLTAGE * ANALOG_MAX
 		);
 	}
 }
@@ -107,4 +122,9 @@ void setup() {
 void loop() {
 	readKeyboard();
 	playNotes();
+
+	double testPointVoltage = analogRead(OSCILLOSCOPE_PIN) /
+		static_cast<double>(ANALOG_MAX) * MAX_OUTPUT_VOLTAGE;
+
+	Serial.println("OSC | " + String(micros()) + " | " + String(testPointVoltage, 4));
 }
