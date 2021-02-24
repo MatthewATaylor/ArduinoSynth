@@ -96,7 +96,6 @@ double getSecondaryVoltageForFrequency(double frequency) {
 
 void setup() {
 	Serial.begin(115200);
-	//Serial.setTimeout(4);
 
 	primaryDac.begin(0x60);
 	secondaryDac.begin(0x61);
