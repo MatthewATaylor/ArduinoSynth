@@ -5,6 +5,7 @@
 
 #include "Key.h"
 #include "SerialReader.h"
+#include "Sequencer.h"
 
 const uint8_t NUM_KEYS = 32;
 const double MIN_KEY_HERTZ = 87.30706; // F2
@@ -18,6 +19,7 @@ Adafruit_MCP4725 primaryDac;
 Adafruit_MCP4725 secondaryDac;
 Key keys[NUM_KEYS];
 SerialReader serialReader;
+Sequencer sequencer(ANALOG_MAX, 22, 23, 24, 2, 26);
 
 int getArgumentInt(char *command, size_t length, size_t prefixLength) {
 	char argument[length - prefixLength + 1];
@@ -37,21 +39,27 @@ void readKeyboard() {
 	uint8_t bufferLength = serialReader.getBufferLength();
 	// Serial.println("ECHO | " + String(serialBuffer));
 
-	uint8_t noteOnPrefixLength = 3;
-	uint8_t noteOffPrefixLength = 4;
+	uint8_t noteOnPrefixLength = 3;  // "ON "
+	uint8_t noteOffPrefixLength = 4;  // "OFF "
 
 	// Set keys on or off based on MIDI keyboard input
 	if (bufferLength > noteOnPrefixLength && serialBuffer[0] == 'O' && serialBuffer[1] == 'N') {
 		int noteId = getArgumentInt(serialBuffer, bufferLength, noteOnPrefixLength);
 		if (noteId >= 0 && noteId < NUM_KEYS) {
-			keys[noteId].on = true;
+			if (sequencer.isConfiguring()) {
+				sequencer.append(noteId);
+			}
+			else if (!sequencer.isPlaying()) {
+				// Only play note when not sequencing or playing
+				keys[noteId].on = true;
+			}
 		}
 	}
 	else if (bufferLength > noteOffPrefixLength &&
 		serialBuffer[0] == 'O' && serialBuffer[1] == 'F' && serialBuffer[2] == 'F'
 	) {
 		int noteId = getArgumentInt(serialBuffer, bufferLength, noteOffPrefixLength);
-		if (noteId >= 0 && noteId < NUM_KEYS) {
+		if (noteId >= 0 && noteId < NUM_KEYS && !sequencer.isPlaying()) {
 			keys[noteId].on = false;
 		}
 	}
@@ -120,6 +128,7 @@ void setup() {
 
 void loop() {
 	readKeyboard();
+	sequencer.update(keys, NUM_KEYS);
 	playNotes();
 
 	double testPointVoltage = analogRead(OSCILLOSCOPE_PIN) /
