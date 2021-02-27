@@ -3,12 +3,12 @@
 DebouncedButton::DebouncedButton(uint32_t pin) : PIN(pin) {}
 
 bool DebouncedButton::wasClicked() {
-	// if (millis() - lastClickTime_ms > 50) {
-	// 	bool buttonIsPressed = digitalRead(PIN);
-	// 	if (buttonIsPressed != buttonWasPressed) {
-	// 		buttonWasPressed = buttonIsPressed;
-	// 		return buttonIsPressed;
-	// 	}
-	// }
+	bool buttonIsPressed = digitalRead(PIN) == HIGH;
+	uint32_t currentTime_ms = millis();
+	if (currentTime_ms - lastClickTime_ms > 50 && buttonIsPressed != buttonWasPressed) {
+		buttonWasPressed = buttonIsPressed;
+		lastClickTime_ms = currentTime_ms;
+		return buttonIsPressed;
+	}
 	return false;
 }

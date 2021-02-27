@@ -55,6 +55,7 @@ void Sequencer::update(Key *keys, uint8_t numKeys) {
 
 	if (restButton.wasClicked()) {
 		append(REST_ID);
+		Serial.println("REST");
 	}
 
 	// Turn on notes in sequence
