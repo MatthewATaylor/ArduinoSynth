@@ -3,23 +3,20 @@
 #include <Wire.h>
 #include <Adafruit_MCP4725.h>
 
-#include "Key.h"
+#include "KeyManager.h"
 #include "SerialReader.h"
 #include "Sequencer.h"
 
-const uint8_t NUM_KEYS = 32;
-const double MIN_KEY_HERTZ = 87.30706; // F2
-
 const double MAX_OUTPUT_VOLTAGE = 3.3;
-const uint32_t ANALOG_MAX = 4095;
+const double ANALOG_MAX = 4095.0;
 const uint32_t DETUNE_PIN = 0;
 const uint32_t OSCILLOSCOPE_PIN = 1;
 
 Adafruit_MCP4725 primaryDac;
 Adafruit_MCP4725 secondaryDac;
-Key keys[NUM_KEYS];
+KeyManager keyManager(32, 87.30706 /* F2 */, 2, ANALOG_MAX, MAX_OUTPUT_VOLTAGE);
 SerialReader serialReader;
-Sequencer sequencer(ANALOG_MAX, 22, 23, 24, 2, 26);
+Sequencer sequencer(ANALOG_MAX, 22, 23, 24, 2, 26, &keyManager);
 
 int getArgumentInt(char *command, size_t length, size_t prefixLength) {
 	char argument[length - prefixLength + 1];
@@ -37,7 +34,6 @@ void readKeyboard() {
 		return;
 	}
 	uint8_t bufferLength = serialReader.getBufferLength();
-	// Serial.println("ECHO | " + String(serialBuffer));
 
 	uint8_t noteOnPrefixLength = 3;  // "ON "
 	uint8_t noteOffPrefixLength = 4;  // "OFF "
@@ -45,13 +41,13 @@ void readKeyboard() {
 	// Set keys on or off based on MIDI keyboard input
 	if (bufferLength > noteOnPrefixLength && serialBuffer[0] == 'O' && serialBuffer[1] == 'N') {
 		int noteId = getArgumentInt(serialBuffer, bufferLength, noteOnPrefixLength);
-		if (noteId >= 0 && noteId < NUM_KEYS) {
+		if (noteId >= 0 && noteId < keyManager.getNumKeys()) {
 			if (sequencer.isConfiguring()) {
 				sequencer.append(noteId);
 			}
 			else if (!sequencer.isPlaying()) {
 				// Only play note when not sequencing or playing
-				keys[noteId].on = true;
+				keyManager.enableKey(noteId);
 			}
 		}
 	}
@@ -59,47 +55,10 @@ void readKeyboard() {
 		serialBuffer[0] == 'O' && serialBuffer[1] == 'F' && serialBuffer[2] == 'F'
 	) {
 		int noteId = getArgumentInt(serialBuffer, bufferLength, noteOffPrefixLength);
-		if (noteId >= 0 && noteId < NUM_KEYS && !sequencer.isPlaying()) {
-			keys[noteId].on = false;
+		if (noteId >= 0 && noteId < keyManager.getNumKeys() && !sequencer.isPlaying()) {
+			keyManager.disableKey(noteId);
 		}
 	}
-}
-
-void playKey(uint8_t index) {
-	primaryDac.setVoltage(keys[index].primaryAnalogOutput, false);
-
-	int detuneValue = analogRead(DETUNE_PIN);
-	double detuneExponent = (detuneValue - ANALOG_MAX / 2.0) *
-		14.0 / static_cast<double>(ANALOG_MAX);
-	double detuneMultiplier = pow(2.0, detuneExponent / 12.0);
-	secondaryDac.setVoltage(keys[index].secondaryAnalogOutput * detuneMultiplier, false);
-
-	// Serial.print("INFO | DAC 1 target voltage: ");
-	// Serial.print(String(keys[index].primaryVoltage, 4));
-	// Serial.print(" | DAC 2 target voltage: ");
-	// Serial.print(String(keys[index].secondaryVoltage, 4));
-	// Serial.print(" | Target frequency: ");
-	// Serial.println(String(keys[index].frequency, 2));
-}
-
-void playNotes() {
-	// Play the lowest note that's on
-	for (uint8_t i = 0; i < NUM_KEYS; ++i) {
-		if (keys[i].on) {
-			playKey(i);
-			return;
-		}
-	}
-	primaryDac.setVoltage(0, false);
-	secondaryDac.setVoltage(0, false);
-}
-
-//Models determined experimentally
-double getPrimaryVoltageForFrequency(double frequency) {
-	return 0.00000029 * frequency * frequency + 0.00260996 * frequency + 0.03378609;
-}
-double getSecondaryVoltageForFrequency(double frequency) {
-	return 0.00000022 * frequency * frequency + 0.00257616 * frequency + 0.04023571;
 }
 
 void setup() {
@@ -110,29 +69,14 @@ void setup() {
 
 	analogReadResolution(12);
 	analogWriteResolution(12);
-
-	for (uint8_t i = 0; i < NUM_KEYS; ++i) {
-		keys[i].frequency = MIN_KEY_HERTZ * pow(2.0, i / 12.0);
-
-		keys[i].primaryVoltage = getPrimaryVoltageForFrequency(keys[i].frequency);
-		keys[i].primaryAnalogOutput = static_cast<uint32_t>(
-			keys[i].primaryVoltage / MAX_OUTPUT_VOLTAGE * ANALOG_MAX
-		);
-
-		keys[i].secondaryVoltage = getSecondaryVoltageForFrequency(keys[i].frequency);
-		keys[i].secondaryAnalogOutput = static_cast<uint32_t>(
-			keys[i].secondaryVoltage / MAX_OUTPUT_VOLTAGE * ANALOG_MAX
-		);
-	}
 }
 
 void loop() {
 	readKeyboard();
-	sequencer.update(keys, NUM_KEYS);
-	playNotes();
+	sequencer.update();
+	keyManager.playLastKey(&primaryDac, &secondaryDac, analogRead(DETUNE_PIN), false);
+	keyManager.setGate();
 
-	double testPointVoltage = analogRead(OSCILLOSCOPE_PIN) /
-		static_cast<double>(ANALOG_MAX) * MAX_OUTPUT_VOLTAGE;
-
+	double testPointVoltage = analogRead(OSCILLOSCOPE_PIN) / ANALOG_MAX * MAX_OUTPUT_VOLTAGE;
 	Serial.println("OSC | " + String(micros()) + " | " + String(testPointVoltage, 4));
 }

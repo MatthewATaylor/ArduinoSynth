@@ -1,6 +1,8 @@
 #include "DebouncedButton.h"
 
-DebouncedButton::DebouncedButton(uint32_t pin) : PIN(pin) {}
+DebouncedButton::DebouncedButton(uint32_t pin) : PIN(pin) {
+	pinMode(pin, INPUT);
+}
 
 bool DebouncedButton::wasClicked() {
 	bool buttonIsPressed = digitalRead(PIN) == HIGH;

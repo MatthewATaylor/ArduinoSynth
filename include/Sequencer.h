@@ -4,7 +4,7 @@
 #include <Arduino.h>
 
 #include "DebouncedButton.h"
-#include "Key.h"
+#include "KeyManager.h"
 #include "Sequence.h"
 
 class Sequencer {
@@ -19,12 +19,13 @@ private:
 	const uint32_t NOTE_LENGTH_PIN;
 	const uint32_t LED_PIN;
 
+	DebouncedButton restButton;
+	KeyManager *keyManager;
+
 	bool wasResettingSequence = false;
 
 	Sequence tempSequence;
 	Sequence mainSequence;
-
-	DebouncedButton restButton;
 
 	uint32_t prevNoteStartTime_ms = 0;
 	int noteIndex = -1;
@@ -33,7 +34,8 @@ private:
 public:
 	Sequencer(
 		double analogMax, uint32_t appendPin, uint32_t restPin,
-		uint32_t resetPin, uint32_t noteLengthPin, uint32_t ledPin
+		uint32_t resetPin, uint32_t noteLengthPin, uint32_t ledPin,
+		KeyManager *keyManager
 	);
 
 	bool isAppendingSequence();
@@ -44,7 +46,7 @@ public:
 	uint32_t getNoteLength_ms();
 
 	void append(uint8_t keyIndex);
-	void update(Key *keys, uint8_t numKeys);
+	void update();
 };
 
 #endif

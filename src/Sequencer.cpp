@@ -2,12 +2,13 @@
 
 Sequencer::Sequencer(
 	double analogMax, uint32_t appendPin, uint32_t restPin,
-	uint32_t resetPin, uint32_t noteLengthPin, uint32_t ledPin
+	uint32_t resetPin, uint32_t noteLengthPin, uint32_t ledPin,
+	KeyManager *keyManager
 ) : ANALOG_MAX(analogMax), APPEND_PIN(appendPin), REST_PIN(restPin), RESET_PIN(resetPin),
-	NOTE_LENGTH_PIN(noteLengthPin), LED_PIN(ledPin), restButton(REST_PIN) {
+	NOTE_LENGTH_PIN(noteLengthPin), LED_PIN(ledPin), restButton(REST_PIN),
+	keyManager(keyManager) {
 
 	pinMode(appendPin, INPUT);
-	pinMode(restPin, INPUT);
 	pinMode(resetPin, INPUT);
 	pinMode(ledPin, OUTPUT);
 }
@@ -37,16 +38,14 @@ void Sequencer::append(uint8_t keyIndex) {
 		tempSequence.append(keyIndex);
 	}
 }
-void Sequencer::update(Key *keys, uint8_t numKeys) {
+void Sequencer::update() {
 	bool resetting = isResettingSequence();
 
 	if (!resetting && wasResettingSequence) {
 		// Replace mainSequence with tempSequence
 		mainSequence.move(&tempSequence);
 		if (mainSequence.length == 0) {
-			for (uint8_t i = 0; i < numKeys; ++i) {
-				keys[i].on = false;
-			}
+			keyManager->disableAllKeys();
 			digitalWrite(LED_PIN, LOW);
 		}
 	}
@@ -55,7 +54,6 @@ void Sequencer::update(Key *keys, uint8_t numKeys) {
 
 	if (restButton.wasClicked()) {
 		append(REST_ID);
-		Serial.println("REST");
 	}
 
 	// Turn on notes in sequence
@@ -70,13 +68,6 @@ void Sequencer::update(Key *keys, uint8_t numKeys) {
 			digitalWrite(LED_PIN, ledWasOn ? LOW : HIGH);
 			ledWasOn = !ledWasOn;
 		}
-		for (uint8_t i = 0; i < numKeys; ++i) {
-			if (i == mainSequence.sequence[noteIndex]) {
-				keys[i].on = true;
-			}
-			else {
-				keys[i].on = false;
-			}
-		}
+		keyManager->disableAllKeysExcept(mainSequence.sequence[noteIndex]);
 	}
 }

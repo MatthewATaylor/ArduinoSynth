@@ -38,5 +38,5 @@ void Sequence::print() {
 	for (size_t i = 0; i < length; ++i) {
 		sequenceStr += String(sequence[i]) + " ";
 	}
-	Serial.println("INFO | " + sequenceStr);
+	Serial.println("SEQ | " + sequenceStr);
 }
